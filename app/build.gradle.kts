@@ -21,7 +21,16 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+        debug {
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -72,6 +81,9 @@ dependencies {
     
     // 导航
     implementation("androidx.navigation:navigation-compose:2.7.7")
+    
+    // Coil 图片加载
+    implementation("io.coil-kt:coil-compose:2.5.0")
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

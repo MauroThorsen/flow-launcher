@@ -50,6 +50,21 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import com.example.flowlauncher.data.model.SearchSettings
 import com.example.flowlauncher.data.model.AppSettings
 import com.example.flowlauncher.utils.PermissionUtils
+import kotlinx.coroutines.delay
+import coil.compose.AsyncImage
+import com.example.flowlauncher.plugin.PluginLoader
+import com.example.flowlauncher.plugin.ISearchPlugin
+import com.example.flowlauncher.plugin.SearchResult
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+
+fun Modifier.onAppear(onAppear: () -> Unit): Modifier {
+    return this.onGloballyPositioned { coordinates ->
+        if (coordinates.size.height > 0) {
+            onAppear()
+        }
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,7 +76,8 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         val permissions = mutableListOf(
-            Manifest.permission.READ_EXTERNAL_STORAGE
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.READ_CONTACTS
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
@@ -104,23 +120,67 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     var showPermissionDialog by remember { mutableStateOf(false) }
     var hasUsagePermission by remember { mutableStateOf(PermissionUtils.hasUsageStatsPermission(context)) }
     
-    // 获取应用列表
-    val apps = remember { AppUtils.getInstalledApps(context, appSettings.showSystemApps) }
-    val files = remember { FileUtils.getFilesInDirectory("/storage/emulated/0/") }
+    // 应用和文件列表
+    val apps = remember { mutableStateListOf<AppInfo>() }
+    val files = remember { mutableStateListOf<FileInfo>() }
+    var isLoading by remember { mutableStateOf(true) }
     
-    // 获取常用应用列表
-    val frequentApps = remember(hasUsagePermission) { 
-        if (hasUsagePermission) {
-            AppUtils.getFrequentlyUsedApps(
-                context, 
+    // 分页加载
+    var currentPage by remember { mutableStateOf(0) }
+    val pageSize = 20
+    
+    // 搜索词变化时重置分页
+    LaunchedEffect(searchText) {
+        currentPage = 0
+    }
+    
+    // 插件相关
+    val pluginLoader = remember { PluginLoader(context) }
+    val plugins = remember { 
+        println("开始加载插件...")
+        val loadedPlugins = pluginLoader.loadPlugins()
+        println("加载到的插件数量: ${loadedPlugins.size}")
+        loadedPlugins.forEach { plugin ->
+            println("已加载插件: ${plugin.getPluginName()}")
+        }
+        loadedPlugins
+    }
+    var pluginResults by remember { mutableStateOf<List<SearchResult>>(emptyList()) }
+    
+    // 异步加载数据
+    LaunchedEffect(Unit) {
+        isLoading = true
+        try {
+            val frequentAppsList = AppUtils.getFrequentlyUsedApps(
+                context,
                 appSettings.frequentAppCount,
                 appSettings.showSystemApps
             )
-        } else {
-            // 如果没有权限，则显示按字母排序的前几个应用
-            apps.take(appSettings.frequentAppCount)
+            println("常用应用数量: ${frequentAppsList.size}")
+            frequentAppsList.forEach { println("常用应用: ${it.appName} - ${it.packageName}") }
+
+            val allApps = AppUtils.getInstalledApps(context, appSettings.showSystemApps)
+            println("全部应用数量: ${allApps.size}")
+            allApps.forEach { println("全部应用: ${it.appName} - ${it.packageName}") }
+
+            apps.clear()
+            if (frequentAppsList.isNotEmpty()) {
+                apps.addAll(frequentAppsList)
+                apps.addAll(allApps.filter { app ->
+                    frequentAppsList.none { it.packageName == app.packageName }
+                })
+            } else {
+                apps.addAll(allApps)
+            }
+            files.clear()
+            files.addAll(FileUtils.getFilesInDirectory("/storage/emulated/0/"))
+        } finally {
+            isLoading = false
         }
     }
+    
+    // 获取常用应用列表，始终保证有内容
+    val frequentApps = apps.take(appSettings.frequentAppCount)
 
     // 检查权限并显示对话框
     LaunchedEffect(Unit) {
@@ -153,22 +213,46 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         )
     }
 
-    // 监听权限变化
+    // 优化权限检查，只在需要时检查
     LaunchedEffect(Unit) {
-        while (true) {
-            kotlinx.coroutines.delay(1000)
-            val newPermissionState = PermissionUtils.hasUsageStatsPermission(context)
-            if (newPermissionState != hasUsagePermission) {
-                hasUsagePermission = newPermissionState
-            }
+        if (!hasUsagePermission) {
+            delay(5000) // 5秒后再次检查
+            hasUsagePermission = PermissionUtils.hasUsageStatsPermission(context)
         }
     }
 
-    val filteredApps = apps.filter { 
-        it.appName.contains(searchText, true) || 
-        it.packageName.contains(searchText, true) 
+    // 搜索时调用插件
+    LaunchedEffect(searchText) {
+        if (searchText.isNotBlank()) {
+            println("开始搜索插件结果，搜索词: $searchText")
+            println("当前已加载插件数量: ${plugins.size}")
+            val allResults = plugins.flatMap { plugin ->
+                println("调用插件 ${plugin.getPluginName()} 进行搜索")
+                try {
+                    plugin.search(context, searchText).also { results ->
+                        println("插件 ${plugin.getPluginName()} 返回结果数量: ${results.size}")
+                        results.forEach { result ->
+                            println("搜索结果: ${result.title} - ${result.subtitle}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    println("插件 ${plugin.getPluginName()} 搜索出错: ${e.message}")
+                    e.printStackTrace()
+                    emptyList()
+                }
+            }
+            println("所有插件搜索完成，总结果数量: ${allResults.size}")
+            pluginResults = allResults
+        } else {
+            pluginResults = emptyList()
+        }
     }
-    val filteredFiles = files.filter { it.name.contains(searchText, true) }
+
+    val filteredApps = apps.filter { app ->
+        app.appName.contains(searchText, true) || 
+        app.packageName.contains(searchText, true) 
+    }
+    val filteredFiles = files.filter { file -> file.name.contains(searchText, true) }
 
     // 联想词状态
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -176,13 +260,9 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     
     // 联想词请求
     LaunchedEffect(searchText) {
-        println("搜索文本变化: '$searchText'")
         if (searchText.isNotBlank()) {
-            println("开始请求联想词...")
             suggestions = GoogleSuggestUtils.fetchSuggestions(searchText)
-            println("获取到 ${suggestions.size} 个联想词")
         } else {
-            println("搜索文本为空，清空联想词")
             suggestions = emptyList()
             isExpanded = false
         }
@@ -215,7 +295,6 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     }
                 )
                 
-                // 添加间距
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
@@ -280,11 +359,46 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     }
                 }
                 
+                // 插件搜索结果
+                if (searchText.isNotBlank() && pluginResults.isNotEmpty()) {
+                    items(pluginResults) { result ->
+                        ListItem(
+                            headlineContent = { Text(result.title) },
+                            supportingContent = { Text(result.subtitle) }
+                        )
+                    }
+                }
+                
                 // 本地搜索结果（仅在联想词未展开时显示）
                 if (searchText.isNotBlank() && !isExpanded) {
-                    items(filteredApps) { app ->
+                    val total = filteredApps.size
+                    val startIndex = minOf(currentPage * pageSize, total)
+                    val endIndex = minOf(startIndex + pageSize, total)
+                    val pageItems = filteredApps.subList(startIndex, endIndex)
+
+                    println("分页调试: currentPage=$currentPage, pageSize=$pageSize, total=$total, startIndex=$startIndex, endIndex=$endIndex, pageItems.size=${pageItems.size}")
+
+                    items(filteredApps.take(endIndex)) { app ->
+                        println("渲染应用: ${app.appName} - ${app.packageName}")
                         SearchResultItem(app)
                     }
+
+                    // 如果还有更多数据，添加加载更多的触发器
+                    if (endIndex < total) {
+                        item {
+                            // 加载更多的触发器
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .onAppear {
+                                        println("触发下一页: currentPage=$currentPage, endIndex=$endIndex, total=$total")
+                                        currentPage++
+                                    }
+                            )
+                        }
+                    }
+
                     items(filteredFiles) { file ->
                         FileItem(file)
                     }
@@ -373,8 +487,8 @@ fun FrequentAppItem(app: AppInfo, maxWidth: Int) {
                 intent?.let { context.startActivity(it) }
             }
     ) {
-        Image(
-            bitmap = remember(app.icon) { app.icon.toBitmap(96, 96).asImageBitmap() },
+        AsyncImage(
+            model = app.icon,
             contentDescription = app.appName,
             modifier = Modifier
                 .size(50.dp)
@@ -414,8 +528,8 @@ fun SearchResultItem(app: AppInfo) {
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Image(
-                bitmap = remember(app.icon) { app.icon.toBitmap(48, 48).asImageBitmap() },
+            AsyncImage(
+                model = app.icon,
                 contentDescription = app.appName,
                 modifier = Modifier
                     .size(40.dp)
