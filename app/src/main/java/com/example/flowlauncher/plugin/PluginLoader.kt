@@ -14,6 +14,9 @@ class PluginLoader(private val context: Context) {
         println("添加内置联系人搜索插件")
         plugins.add(ContactsSearchPlugin())
         
+        println("添加短信搜索插件")
+        plugins.add(SmsSearchPlugin())
+        
         // 加载外部插件
         pluginDir?.listFiles()?.forEach { file ->
             println("检查文件: ${file.name}")
@@ -39,51 +42,5 @@ class PluginLoader(private val context: Context) {
         }
         println("插件加载完成，总数: ${plugins.size}")
         return plugins
-    }
-}
-
-// 内置的联系人搜索插件
-class ContactsSearchPlugin : ISearchPlugin {
-    override fun getPluginName(): String = "联系人搜索"
-
-    override fun search(context: Context, query: String): List<SearchResult> {
-        println("联系人搜索插件开始搜索: $query")
-        val results = mutableListOf<SearchResult>()
-        try {
-            val cursor = context.contentResolver.query(
-                android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                arrayOf(
-                    android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-                    android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER
-                ),
-                "${android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
-                arrayOf("%$query%"),
-                null
-            )
-            println("查询联系人数据库完成")
-            
-            cursor?.use {
-                println("联系人游标是否为空: ${cursor == null}")
-                println("联系人数量: ${cursor.count}")
-                while (it.moveToNext()) {
-                    val name = it.getString(0)
-                    val number = it.getString(1)
-                    println("找到联系人: $name - $number")
-                    results.add(
-                        SearchResult(
-                            title = name,
-                            subtitle = number,
-                            iconBase64 = null,
-                            actionIntent = ""
-                        )
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            println("联系人搜索出错: ${e.message}")
-            e.printStackTrace()
-        }
-        println("联系人搜索完成，找到 ${results.size} 个结果")
-        return results
     }
 } 

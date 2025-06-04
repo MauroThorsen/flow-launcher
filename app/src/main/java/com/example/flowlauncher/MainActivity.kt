@@ -54,9 +54,9 @@ import kotlinx.coroutines.delay
 import coil.compose.AsyncImage
 import com.example.flowlauncher.plugin.PluginLoader
 import com.example.flowlauncher.plugin.ISearchPlugin
-import com.example.flowlauncher.plugin.SearchResult
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import com.example.flowlauncher.plugin.SearchResult
 
 fun Modifier.onAppear(onAppear: () -> Unit): Modifier {
     return this.onGloballyPositioned { coordinates ->
