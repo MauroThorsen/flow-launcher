@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -67,13 +68,21 @@ fun Modifier.onAppear(onAppear: () -> Unit): Modifier {
 }
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        private const val TAG = "FlowLauncher"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d(TAG, "应用启动 - onCreate开始执行")
         
         // 启用边缘到边缘显示
         enableEdgeToEdge()
+        Log.d(TAG, "已启用边缘到边缘显示")
+        
         // 设置系统栏为透明
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        Log.d(TAG, "已设置系统栏为透明")
 
         val permissions = mutableListOf(
             Manifest.permission.READ_EXTERNAL_STORAGE,
@@ -84,11 +93,20 @@ class MainActivity : ComponentActivity() {
             permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
             permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
         }
+        Log.d(TAG, "需要请求的权限列表: ${permissions.joinToString()}")
+        
         val requestPermissionLauncher =
-            registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+            registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+                Log.d(TAG, "权限请求结果:")
+                permissions.forEach { (permission, isGranted) ->
+                    Log.d(TAG, "权限 $permission: ${if (isGranted) "已授予" else "未授予"}")
+                }
+            }
         requestPermissionLauncher.launch(permissions.toTypedArray())
+        Log.d(TAG, "已发起权限请求")
 
         setContent {
+            Log.d(TAG, "开始设置UI内容")
             FlowLauncherTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -101,6 +119,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            Log.d(TAG, "UI内容设置完成")
         }
     }
 }
@@ -115,10 +134,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     // 应用设置
     val appSettings = remember { AppSettings() }
     val searchSettings = remember { SearchSettings() }
+    Log.d("FlowLauncher", "应用设置初始化完成 - showSystemApps: ${appSettings.showSystemApps}, frequentAppCount: ${appSettings.frequentAppCount}")
     
     // 权限状态
     var showPermissionDialog by remember { mutableStateOf(false) }
     var hasUsagePermission by remember { mutableStateOf(PermissionUtils.hasUsageStatsPermission(context)) }
+    Log.d("FlowLauncher", "权限状态检查 - 使用情况访问权限: ${if (hasUsagePermission) "已授予" else "未授予"}")
     
     // 应用和文件列表
     val apps = remember { mutableStateListOf<AppInfo>() }
@@ -131,17 +152,18 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     
     // 搜索词变化时重置分页
     LaunchedEffect(searchText) {
+        Log.d("FlowLauncher", "搜索词变化: $searchText")
         currentPage = 0
     }
     
     // 插件相关
     val pluginLoader = remember { PluginLoader(context) }
     val plugins = remember { 
-        println("开始加载插件...")
+        Log.d("FlowLauncher", "开始加载插件...")
         val loadedPlugins = pluginLoader.loadPlugins()
-        println("加载到的插件数量: ${loadedPlugins.size}")
+        Log.d("FlowLauncher", "插件加载完成 - 数量: ${loadedPlugins.size}")
         loadedPlugins.forEach { plugin ->
-            println("已加载插件: ${plugin.getPluginName()}")
+            Log.d("FlowLauncher", "已加载插件: ${plugin.getPluginName()}")
         }
         loadedPlugins
     }
@@ -149,6 +171,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     
     // 异步加载数据
     LaunchedEffect(Unit) {
+        Log.d("FlowLauncher", "开始异步加载数据")
         isLoading = true
         try {
             val frequentAppsList = AppUtils.getFrequentlyUsedApps(
@@ -156,12 +179,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 appSettings.frequentAppCount,
                 appSettings.showSystemApps
             )
-            println("常用应用数量: ${frequentAppsList.size}")
-            frequentAppsList.forEach { println("常用应用: ${it.appName} - ${it.packageName}") }
+            Log.d("FlowLauncher", "常用应用加载完成 - 数量: ${frequentAppsList.size}")
+            frequentAppsList.forEach { Log.d("FlowLauncher", "常用应用: ${it.appName} (${it.packageName})") }
 
             val allApps = AppUtils.getInstalledApps(context, appSettings.showSystemApps)
-            println("全部应用数量: ${allApps.size}")
-            allApps.forEach { println("全部应用: ${it.appName} - ${it.packageName}") }
+            Log.d("FlowLauncher", "全部应用加载完成 - 数量: ${allApps.size}")
+            allApps.forEach { Log.d("FlowLauncher", "全部应用: ${it.appName} (${it.packageName})") }
 
             apps.clear()
             if (frequentAppsList.isNotEmpty()) {
@@ -172,10 +195,16 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             } else {
                 apps.addAll(allApps)
             }
+            Log.d("FlowLauncher", "应用列表合并完成 - 总数: ${apps.size}")
+
             files.clear()
             files.addAll(FileUtils.getFilesInDirectory("/storage/emulated/0/"))
+            Log.d("FlowLauncher", "文件列表加载完成 - 数量: ${files.size}")
+        } catch (e: Exception) {
+            Log.e("FlowLauncher", "数据加载失败", e)
         } finally {
             isLoading = false
+            Log.d("FlowLauncher", "数据加载完成")
         }
     }
     
